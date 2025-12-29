@@ -1,61 +1,198 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>HR Upload Dashboard</title>
-    <style>
-        body { font-family: Arial; padding: 40px; }
-        textarea { width: 100%; height: 150px; }
-        input, button { margin-top: 10px; }
-        .box { border: 1px solid #ccc; padding: 20px; margin-bottom: 20px; }
-    </style>
+  <meta charset="UTF-8">
+  <title>AI CV Screening Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <script>
-        function toggleJDInput() {
-            const text = document.getElementById("job_text");
-            const file = document.getElementById("job_file");
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 0;
+    }
 
-            if (text.value.trim() !== "") {
-                file.disabled = true;
-            } else {
-                file.disabled = false;
-            }
-        }
-    </script>
+    .container {
+      max-width: 900px;
+      margin: 40px auto;
+      background: #ffffff;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      margin-top: 0;
+      color: #1f2937;
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 20px;
+      color: #374151;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 160px;
+      padding: 12px;
+      margin-top: 8px;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+      resize: vertical;
+      font-size: 14px;
+    }
+
+    input[type="file"] {
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    .hint {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 6px;
+    }
+
+    .divider {
+      margin: 30px 0;
+      border-top: 1px dashed #e5e7eb;
+    }
+
+    button {
+      background: #2563eb;
+      color: #ffffff;
+      border: none;
+      padding: 14px 22px;
+      border-radius: 6px;
+      font-size: 15px;
+      cursor: pointer;
+      margin-top: 25px;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+
+    progress {
+      width: 100%;
+      height: 20px;
+      margin-top: 15px;
+    }
+
+    .footer-note {
+      margin-top: 30px;
+      font-size: 13px;
+      color: #6b7280;
+      text-align: center;
+    }
+  </style>
 </head>
+
 <body>
 
-<h2>HR Job & CV Upload</h2>
+<div class="container">
+  <h1>AI CV Screening Dashboard</h1>
+  <p>Upload a job description and a folder of CVs. The AI will rank candidates automatically.</p>
 
-<form method="POST" enctype="multipart/form-data">
+  <form id="uploadForm" method="POST" enctype="multipart/form-data">
 
-    <div class="box">
-        <h3>Job Description</h3>
-        <textarea name="job_text" id="job_text" placeholder="Paste job description here..."
-                  onkeyup="toggleJDInput()"></textarea>
-
-        <br><strong>OR</strong><br>
-
-        <input type="file" name="job_file" id="job_file" accept=".pdf,.doc,.docx,.txt">
+    <!-- JOB DESCRIPTION TEXT -->
+    <label for="job_text">Job Description (Paste Text)</label>
+    <textarea id="job_text" name="job_text"
+      placeholder="Paste the full job description here..."></textarea>
+    <div class="hint">
+      If you paste text here, job description file upload will be disabled.
     </div>
 
-    <div class="box">
-        <h3>Upload CVs (Folder Supported)</h3>
-        <input type="file" name="cvs" webkitdirectory multiple>
+    <!-- JOB DESCRIPTION FILE -->
+    <label for="job_file">Or Upload Job Description File (PDF, DOCX, TXT)</label>
+    <input type="file" id="job_file" name="job_file" accept=".pdf,.doc,.docx,.txt">
+    <div class="hint">
+      Only upload if the text box above is empty.
     </div>
 
-    <button type="submit">Upload</button>
+    <div class="divider"></div>
 
-</form>
+    <!-- CVS -->
+    <label for="cvs">Upload CVs Folder</label>
+    <input type="file"
+           id="cvs"
+           name="cvs"
+           webkitdirectory
+           directory
+           multiple
+           required>
+    <div class="hint">
+      Select a folder containing all candidate CVs (PDF, DOC, DOCX, TXT).
+    </div>
 
-{% with messages = get_flashed_messages() %}
-  {% if messages %}
-    <ul>
-    {% for msg in messages %}
-      <li>{{ msg }}</li>
-    {% endfor %}
-    </ul>
-  {% endif %}
-{% endwith %}
+    <!-- PROGRESS -->
+    <progress id="progressBar" value="0" max="100"></progress>
+
+    <button type="submit" id="submitBtn">Start AI Screening</button>
+  </form>
+
+  <div class="footer-note">
+    Powered by TinyLLaMA • CV data processed locally on your server
+  </div>
+</div>
+
+<script>
+  const jobText = document.getElementById("job_text");
+  const jobFile = document.getElementById("job_file");
+  const form = document.getElementById("uploadForm");
+  const progressBar = document.getElementById("progressBar");
+  const submitBtn = document.getElementById("submitBtn");
+
+  // Disable job file if text is typed
+  jobText.addEventListener("input", () => {
+    jobFile.disabled = jobText.value.trim().length > 0;
+  });
+
+  // Disable job text if file is selected
+  jobFile.addEventListener("change", () => {
+    jobText.disabled = jobFile.files.length > 0;
+  });
+
+  // Upload with progress bar
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+
+    progressBar.value = 0;
+    submitBtn.disabled = true;
+    submitBtn.innerText = "Uploading & Processing...";
+
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData(form);
+
+    xhr.upload.onprogress = function (e) {
+      if (e.lengthComputable) {
+        progressBar.value = (e.loaded / e.total) * 100;
+      }
+    };
+
+    xhr.onload = function () {
+      if (xhr.status === 200) {
+        window.location.href = "/results";
+      } else {
+        alert("Upload failed. Please try again.");
+        submitBtn.disabled = false;
+        submitBtn.innerText = "Start AI Screening";
+      }
+    };
+
+    xhr.open("POST", "/");
+    xhr.send(formData);
+  });
+</script>
 
 </body>
 </html>
