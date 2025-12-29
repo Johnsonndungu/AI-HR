@@ -1,0 +1,16 @@
+<h2>AI Ranked CVs</h2>
+
+<table border="1" cellpadding="10">
+<tr><th>CV</th><th>Match %</th></tr>
+{% for cv, score in results %}
+<tr {% if score >= 70 %}style="background:#d1fae5"{% endif %}>
+  <td>{{ cv }}</td>
+  <td>{{ score }}</td>
+</tr>
+{% endfor %}
+</table>
+
+<br>
+<a href="/download">
+  <button>Download Shortlisted CVs</button>
+</a>
