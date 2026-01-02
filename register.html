@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register | AI Recruitment System</title>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f5f7fb;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .auth-container {
+      background: #ffffff;
+      width: 380px;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 1.5rem;
+      color: #0f172a;
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 1rem;
+    }
+
+    input {
+      width: 100%;
+      padding: 0.7rem;
+      margin-top: 0.4rem;
+      border-radius: 5px;
+      border: 1px solid #cbd5e1;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 1.5rem;
+      padding: 0.8rem;
+      background: #16a34a;
+      border: none;
+      color: #ffffff;
+      font-size: 1rem;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #15803d;
+    }
+
+    .switch {
+      text-align: center;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+
+    .switch a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+
+    .error {
+      color: #dc2626;
+      text-align: center;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="auth-container">
+  <h2>Recruiter Create Account</h2>
+
+  <div id="error" class="error"></div>
+
+  <label>Company Name</label>
+  <input type="Cname" id="Cname" placeholder="xyz Company" />
+
+  <label>Email</label>
+  <input type="email" id="email" placeholder="you@example.com" />
+
+  <label>Password</label>
+  <input type="password" id="password" placeholder="Minimum 6 characters" />
+
+  <label>Confirm Password</label>
+  <input type="password" id="confirmPassword" placeholder="Re-enter password" />
+
+  <button onclick="register()">Register</button>
+
+  <div class="switch">
+    Already have an account? <a href="/login">Login</a>
+  </div>
+</div>
+
+<script>
+  function register() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    const errorDiv = document.getElementById('error');
+
+    errorDiv.innerText = '';
+
+    if (!email || !password || !confirmPassword) {
+      errorDiv.innerText = 'All fields are required';
+      return;
+    }
+
+    if (password.length < 6) {
+      errorDiv.innerText = 'Password must be at least 6 characters';
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      errorDiv.innerText = 'Passwords do not match';
+      return;
+    }
+
+    fetch('/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.error) {
+        errorDiv.innerText = data.error;
+      } else {
+        window.location.href = '/login';
+      }
+    })
+    .catch(() => {
+      errorDiv.innerText = 'Server error';
+    });
+  }
+</script>
+
+</body>
+</html>
