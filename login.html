@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login | AI Recruitment System</title>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f1f5f9;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    .auth-container {
+      background: #ffffff;
+      width: 360px;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 1.5rem;
+      color: #020617;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-top: 1rem;
+      color: #070708;
+    }
+
+    input {
+      width: 100%;
+      padding: 0.7rem;
+      margin-top: 0.4rem;
+      border-radius: 5px;
+      border: 1px solid #cbd5e1;
+      font-size: 0.95rem;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 1.6rem;
+      padding: 0.8rem;
+      background: #25eb32f0;
+      border: none;
+      color: #ffffff;
+      font-size: 1rem;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button:hover {
+      background: #15803d;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 1.2rem;
+      font-size: 0.9rem;
+      color: #475569;
+    }
+
+    .footer a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .error {
+      color: #dc2626;
+      text-align: center;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="auth-container">
+  <h2>Recruiter Login</h2>
+
+  <div id="error" class="error"></div>
+
+  <label>Email Address</label>
+  <input type="email" id="email" placeholder="you@example.com" />
+
+  <label>Password</label>
+  <input type="password" id="password" placeholder="••••••••" />
+
+  <button onclick="login()">Login</button>
+
+  <div class="footer">
+    Don’t have an account? <a href="/register">Create one</a>
+  </div>
+</div>
+
+<script>
+  function login() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    const errorDiv = document.getElementById('error');
+
+    errorDiv.innerText = '';
+
+    if (!email || !password) {
+      errorDiv.innerText = 'Email and password are required';
+      return;
+    }
+
+    fetch('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.error) {
+        errorDiv.innerText = data.error;
+      } else {
+        window.location.href = '/dashboard';
+      }
+    })
+    .catch(() => {
+      errorDiv.innerText = 'Unable to connect to server';
+    });
+  }
+</script>
+
+</body>
+</html>
