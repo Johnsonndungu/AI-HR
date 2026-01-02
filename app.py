@@ -1,109 +1,263 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
-import os, zipfile, requests
+import os
+import uuid
+import json
+import threading
+import time
+import logging
+import requests
+from datetime import timedelta
+from flask import Flask, request, jsonify, session, render_template
+from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from functools import wraps
+import pdfplumber
+from docx import Document
 
+# ==================================================
+# App Configuration
+# ==================================================
 app = Flask(__name__)
-app.secret_key = "dev-secret"
+app.secret_key = "fixed_secret_key_for_testing"
+app.permanent_session_lifetime = timedelta(days=7)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOADS = os.path.join(BASE_DIR, "uploads")
-JD_DIR = os.path.join(UPLOADS, "job_descriptions")
-CV_DIR = os.path.join(UPLOADS, "cvs")
-RESULTS_DIR = os.path.join(BASE_DIR, "results")
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-for d in [JD_DIR, CV_DIR, RESULTS_DIR]:
-    os.makedirs(d, exist_ok=True)
+# ==================================================
+# Logging
+# ==================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-ALLOWED = {"pdf", "doc", "docx", "txt"}
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+# ==================================================
+# Ollama Configuration
+# ==================================================
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "tinyllama"
 
+# ==================================================
+# Mock Users
+# ==================================================
+mock_users = {
+    "test@ke.com": {
+        "id": 1,
+        "password_hash": generate_password_hash("123456"),
+        "plan": "trial",
+        "usage_count": 0
+    }
+}
 
-def allowed_file(name):
-    return "." in name and name.rsplit(".", 1)[1].lower() in ALLOWED
+# ==================================================
+# Plans
+# ==================================================
+PLANS = {
+    "trial": {"price": 0, "limit": 3},
+    "starter": {"price": 30, "limit": 15},
+    "pro": {"price": 100, "limit": 50},
+    "premium": {"price": 300, "limit": 150},
+}
 
+# ==================================================
+# Progress tracking (in-memory)
+# ==================================================
+progress_store = {}  # job_id: {"progress": 0-100, "message": "", "result": {...}}
 
-def call_tinyllama(job_desc, cv_text):
-    prompt = f"""
-Job Description:
-{job_desc}
+# ==================================================
+# Authentication Middleware
+# ==================================================
+def login_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if "user_id" not in session:
+            return jsonify({"error": "Unauthorized"}), 401
+        return fn(*args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    return wrapper
 
-Candidate CV:
-{cv_text}
-
-Give ONLY a number from 0 to 100 indicating match percentage.
-"""
-    res = requests.post(OLLAMA_URL, json={
-        "model": "tinyllama",
-        "prompt": prompt,
-        "stream": False
-    }, timeout=120)
-
+# ==================================================
+# File Text Extraction
+# ==================================================
+def extract_text_from_pdf(path):
     try:
-        return int("".join(filter(str.isdigit, res.json()["response"])))
-    except:
-        return 0
+        text = ""
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+        return text.strip()
+    except Exception as e:
+        logger.error(f"PDF extraction failed: {e}")
+        return ""
 
+def extract_text_from_docx(path):
+    try:
+        doc = Document(path)
+        return "\n".join(p.text for p in doc.paragraphs).strip()
+    except Exception as e:
+        logger.error(f"DOCX extraction failed: {e}")
+        return ""
 
-@app.route("/", methods=["GET", "POST"])
-def dashboard():
+def extract_text(path):
+    if path.endswith(".pdf"):
+        return extract_text_from_pdf(path)
+    if path.endswith(".docx"):
+        return extract_text_from_docx(path)
+    return ""
+
+# ==================================================
+# Robust Prompt Builder
+# ==================================================
+def build_evaluation_prompt(job_text, cv_text):
+    return f"""
+You are a senior HR professional with over 20 years of experience.
+
+TASK:
+Evaluate how well the candidate fits the job.
+
+STRICT RULES:
+- Respond ONLY with valid JSON
+- No markdown
+
+JOB DESCRIPTION:
+{job_text[:1200]}
+
+CANDIDATE CV:
+{cv_text[:1200]}
+
+OUTPUT FORMAT:
+{{
+  "applicant_name": "<Full Name>",
+  "contact": "<Email or Phone>",
+  "score": <integer 0-100>,
+  "explanation": "<short explanation>",
+  "matched_skills": ["skill1", "skill2"]
+}}
+"""
+
+# ==================================================
+# Ollama JSON Request
+# ==================================================
+def ollama_json_request(prompt, timeout=120):
+    payload = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}
+    try:
+        response = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
+        response.raise_for_status()
+        raw = response.json().get("response", "").strip()
+        return json.loads(raw)
+    except Exception as e:
+        logger.error(f"Ollama request failed: {e}")
+        return None
+
+# ==================================================
+# Background Task
+# ==================================================
+def screen_cv_job(job_id, job_text, cv_path, filename):
+    try:
+        progress_store[job_id] = {"progress": 5, "message": "Reading CV", "result": None}
+        cv_text = extract_text(cv_path)
+
+        progress_store[job_id]["progress"] = 30
+        progress_store[job_id]["message"] = "Analyzing with AI"
+
+        prompt = build_evaluation_prompt(job_text, cv_text)
+        result = ollama_json_request(prompt)
+
+        if not result:
+            result = {
+                "applicant_name": filename,
+                "contact": "N/A",
+                "score": 0,
+                "explanation": "LLM failed",
+                "matched_skills": []
+            }
+
+        progress_store[job_id]["progress"] = 100
+        progress_store[job_id]["message"] = "Completed"
+        progress_store[job_id]["result"] = result
+
+    except Exception as e:
+        progress_store[job_id]["progress"] = 100
+        progress_store[job_id]["message"] = "Error"
+        progress_store[job_id]["result"] = {
+            "applicant_name": filename,
+            "contact": "N/A",
+            "score": 0,
+            "explanation": str(e),
+            "matched_skills": []
+        }
+
+# ==================================================
+# Routes
+# ==================================================
+@app.route("/")
+def index():
+    return render_template("login.html")
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
     if request.method == "POST":
-        job_text = request.form.get("job_text")
-        job_file = request.files.get("job_file")
-        cvs = request.files.getlist("cvs")
+        data = request.json
+        email = data.get("email")
+        password = data.get("password")
+        if email not in mock_users or not check_password_hash(mock_users[email]["password_hash"], password):
+            return jsonify({"error": "Invalid credentials"}), 401
+        session.permanent = True
+        session["user_id"] = mock_users[email]["id"]
+        return jsonify({"message": "Login successful"})
+    return render_template("login.html")
 
-        # Save job description
-        jd_path = os.path.join(JD_DIR, "job.txt")
-        if job_text and job_text.strip():
-            with open(jd_path, "w", encoding="utf-8") as f:
-                f.write(job_text)
-        elif job_file and allowed_file(job_file.filename):
-            job_file.save(jd_path)
-        else:
-            flash("Job description required")
-            return redirect(url_for("dashboard"))
+@app.route("/logout")
+def logout():
+    session.clear()
+    return jsonify({"message": "Logged out"})
 
-        # Save CVs
-        for cv in cvs:
-            if cv and allowed_file(cv.filename):
-                cv.save(os.path.join(CV_DIR, secure_filename(cv.filename)))
-
-        return redirect(url_for("results"))
-
+@app.route("/dashboard")
+@login_required
+def dashboard():
     return render_template("dashboard.html")
 
+@app.route("/screen", methods=["POST"])
+@login_required
+def screen_candidates():
+    user = next((u for u in mock_users.values() if u["id"] == session["user_id"]), None)
+    if user["usage_count"] >= PLANS[user["plan"]]["limit"]:
+        return jsonify({"error": "Usage limit reached"}), 403
 
-@app.route("/results")
-def results():
-    with open(os.path.join(JD_DIR, "job.txt"), encoding="utf-8") as f:
-        job_desc = f.read()
+    job_text = request.form.get("job_text", "")
+    job_file = request.files.get("job_file")
+    if job_file:
+        path = os.path.join(UPLOAD_FOLDER, secure_filename(job_file.filename))
+        job_file.save(path)
+        job_text = extract_text(path)
 
-    scores = []
-    for cv_file in os.listdir(CV_DIR):
-        path = os.path.join(CV_DIR, cv_file)
-        with open(path, errors="ignore") as f:
-            cv_text = f.read()
+    cvs = request.files.getlist("cvs")
+    job_ids = []
 
-        score = call_tinyllama(job_desc, cv_text)
-        scores.append((cv_file, score))
+    for cv in cvs:
+        cv_path = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}_{secure_filename(cv.filename)}")
+        cv.save(cv_path)
+        job_id = str(uuid.uuid4())
+        job_ids.append(job_id)
 
-    scores.sort(key=lambda x: x[1], reverse=True)
+        # Start thread for this CV
+        t = threading.Thread(target=screen_cv_job, args=(job_id, job_text, cv_path, cv.filename))
+        t.start()
 
-    # Zip top 5
-    zip_path = os.path.join(RESULTS_DIR, "shortlisted.zip")
-    with zipfile.ZipFile(zip_path, "w") as z:
-        for cv, score in scores[:5]:
-            z.write(os.path.join(CV_DIR, cv), cv)
+    user["usage_count"] += 1
+    return jsonify({"message": "Screening started", "job_ids": job_ids})
 
-    return render_template("results.html", results=scores)
+@app.route("/job/<job_id>/progress")
+@login_required
+def job_progress(job_id):
+    job = progress_store.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
 
-
-@app.route("/download")
-def download():
-    return send_file(
-        os.path.join(RESULTS_DIR, "shortlisted.zip"),
-        as_attachment=True
-    )
-
-
+# ==================================================
+# Run
+# ==================================================
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
